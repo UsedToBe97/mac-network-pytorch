@@ -1,4 +1,5 @@
 import sys
+import os
 import pickle
 from collections import Counter
 
@@ -8,15 +9,15 @@ from torch import nn
 from torch import optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import argparse
 
 from dataset import CLEVR, collate_data, transform
 from model import MACNetwork
+from config import cfg
 
-batch_size = 64
-n_epoch = 20
-dim = 512
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device(cfg.DEVICE if torch.cuda.is_available() else "cpu")
+print("using {}".format(device))
 
 
 def accumulate(model1, model2, decay=0.999):
@@ -28,9 +29,9 @@ def accumulate(model1, model2, decay=0.999):
 
 
 def train(epoch):
-    clevr = CLEVR(sys.argv[1], transform=transform)
+    clevr = CLEVR(cfg.DATALOADER.FEATURES_PATH, transform=transform)
     train_set = DataLoader(
-        clevr, batch_size=batch_size, num_workers=4, collate_fn=collate_data
+        clevr, batch_size=cfg.DATALOADER.BATCH_SIZE, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=collate_data, drop_last=True
     )
 
     dataset = iter(train_set)
@@ -38,7 +39,7 @@ def train(epoch):
     moving_loss = 0
 
     net.train(True)
-    for image, question, q_len, answer, _ in pbar:
+    for image, question, q_len, answer, _, _ in pbar:
         image, question, answer = (
             image.to(device),
             question.to(device),
@@ -49,49 +50,51 @@ def train(epoch):
         output = net(image, question, q_len)
         loss = criterion(output, answer)
         loss.backward()
+        if cfg.SOLVER.GRAD_CLIP:
+            nn.utils.clip_grad_norm_(net.parameters(), cfg.SOLVER.GRAD_CLIP)
         optimizer.step()
         correct = output.detach().argmax(1) == answer
-        correct = torch.tensor(correct, dtype=torch.float32).sum() / batch_size
+        accuracy = correct.float().mean().item()
 
         if moving_loss == 0:
-            moving_loss = correct
-
+            moving_loss = accuracy
         else:
-            moving_loss = moving_loss * 0.99 + correct * 0.01
+            moving_loss = moving_loss * 0.99 + accuracy * 0.01
 
         pbar.set_description(
             'Epoch: {}; Loss: {:.5f}; Acc: {:.5f}'.format(
-                epoch + 1, loss.item(), moving_loss
+                epoch, loss.item(), moving_loss
             )
         )
-
         accumulate(net_running, net)
 
     clevr.close()
 
 
 def valid(epoch):
-    clevr = CLEVR(sys.argv[1], 'val', transform=None)
+    clevr = CLEVR(cfg.DATALOADER.FEATURES_PATH, 'val', transform=None)
     valid_set = DataLoader(
-        clevr, batch_size=batch_size, num_workers=4, collate_fn=collate_data
+        clevr, batch_size=cfg.DATALOADER.BATCH_SIZE, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=collate_data, drop_last=True
     )
     dataset = iter(valid_set)
 
     net_running.train(False)
-    family_correct = Counter()
-    family_total = Counter()
     with torch.no_grad():
-        for image, question, q_len, answer, family in tqdm(dataset):
+        all_corrects = 0
+
+        for image, question, q_len, answer, _, _ in tqdm(dataset):
             image, question = image.to(device), question.to(device)
 
             output = net_running(image, question, q_len)
             correct = output.detach().argmax(1) == answer.to(device)
-            for c, fam in zip(correct, family):
-                if c:
-                    family_correct[fam] += 1
-                family_total[fam] += 1
+            
+            all_corrects += correct.float().mean().item()
+            acc_steps += float(cfg.ACT.MAX_ITER)
+        
+        if scheduler:
+            scheduler.step(all_corrects / len(dataset))
 
-    with open('log/log_{}.txt'.format(str(epoch + 1).zfill(2)), 'w') as w:
+    with open('log/log_{}_{}.txt'.format(cfg.SAVE_PATH, str(epoch).zfill(2)), 'w') as w:
         for k, v in family_total.items():
             w.write('{}: {:.5f}\n'.format(k, family_correct[k] / v))
 
@@ -104,25 +107,58 @@ def valid(epoch):
     clevr.close()
 
 
+def update_cfg(cfg):
+    parser = argparse.ArgumentParser(description="Train for CACT-Mac")
+    parser.add_argument(
+        "--config-file",
+        metavar="FILE",
+        help="path to config file",
+        required=True,
+    )
+    parser.add_argument(
+        "opts",
+        help="Modify model config options using the command-line",
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
+    args = parser.parse_args()
+
+    cfg.merge_from_file(args.config_file)
+    cfg.merge_from_list(args.opts)
+    cfg.freeze()
+
+    return cfg  
+
+
 if __name__ == '__main__':
-    with open('data/dic.pkl', 'rb') as f:
-        dic = pickle.load(f)
+    cfg = update_cfg(cfg)
 
-    n_words = len(dic['word_dic']) + 1
-    n_answers = len(dic['answer_dic'])
 
-    net = MACNetwork(n_words, dim).to(device)
-    net_running = MACNetwork(n_words, dim).to(device)
+    net = MACNetwork(cfg).to(device)
+    net_running = MACNetwork(cfg).to(device)
+
+    if cfg.LOAD:
+        with open(cfg.LOAD_PATH, 'rb') as f:
+            state = torch.load(f, map_location=device)
+        net.load_state_dict(state)
     accumulate(net_running, net, 0)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(), lr=1e-4)
+    optimizer = optim.Adam(net.parameters(), lr=cfg.SOLVER.LR)
+    
+    # LR scheduler
+    scheduler = None
+    if cfg.SOLVER.USE_SCHEDULER:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.5, patience=2, threshold=0.001, threshold_mode='rel', min_lr=1e-5)
+        experiment.add_tag("SCH")
 
-    for epoch in range(n_epoch):
+    for epoch in range(1, cfg.SOLVER.EPOCHS + 1):
         train(epoch)
         valid(epoch)
 
         with open(
-            'checkpoint/checkpoint_{}.model'.format(str(epoch + 1).zfill(2)), 'wb'
-        ) as f:
+            'checkpoint/checkpoint_{}_{}.model'.format(
+                cfg.SAVE_PATH,
+                str(epoch).zfill(2)),
+            'wb') as f:
             torch.save(net_running.state_dict(), f)
