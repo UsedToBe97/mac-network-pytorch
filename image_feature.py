@@ -50,19 +50,22 @@ class CLEVR(Dataset):
 
 batch_size = 50
 
-resnet = resnet101(True).cuda()
+resnet = resnet101(True).to(device)
 resnet.eval()
 resnet.forward = forward.__get__(resnet, ResNet)
 
 def create_dataset(split):
-    dataloader = DataLoader(CLEVR(sys.argv[1], split), batch_size=batch_size,
+    root = sys.argv[1]
+    dataloader = DataLoader(CLEVR(root, split), batch_size=batch_size,
                             num_workers=4)
 
     size = len(dataloader)
 
     print(split, 'total', size * batch_size)
 
-    f = h5py.File('data/{}_features.hdf5'.format(split), 'w', libver='latest')
+    features_path = os.path.join(root, 'features')
+
+    f = h5py.File('{}/{}_features.hdf5'.format(features_path, split), 'w', libver='latest')
     dset = f.create_dataset('data', (size * batch_size, 1024, 14, 14),
                             dtype='f4')
 
@@ -74,5 +77,6 @@ def create_dataset(split):
 
     f.close()
 
-create_dataset('val')
-create_dataset('train')
+if __name__ == '__main__':
+    create_dataset('val')
+    create_dataset('train')
