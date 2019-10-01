@@ -89,20 +89,11 @@ def valid(epoch):
             correct = output.detach().argmax(1) == answer.to(device)
             
             all_corrects += correct.float().mean().item()
-            acc_steps += float(cfg.ACT.MAX_ITER)
         
         if scheduler:
             scheduler.step(all_corrects / len(dataset))
 
-    with open('log/log_{}_{}.txt'.format(cfg.SAVE_PATH, str(epoch).zfill(2)), 'w') as w:
-        for k, v in family_total.items():
-            w.write('{}: {:.5f}\n'.format(k, family_correct[k] / v))
-
-    print(
-        'Avg Acc: {:.5f}'.format(
-            sum(family_correct.values()) / sum(family_total.values())
-        )
-    )
+        print('Avg Acc: {:.5f}'.format(all_corrects / len(dataset)))
 
     clevr.close()
 
