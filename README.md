@@ -5,6 +5,7 @@ Forked from [rosinality/mac-network-pytorch](https://github.com/rosinality/mac-n
 This fork fixes some of the problems in the rosinality's implementation, such as adding two missing projections, and the addition of gradient clipping and a LR scheduler.
 It also cleans up the code and makes it more easily modified by further separating the model into components and using [yacs](https://github.com/rbgirshick/yacs) for all configuration parameters.
 
+
 ### 1. Install requirements
 
 Run the following command to install missing dependencies:
@@ -35,5 +36,5 @@ To experiment with the model without changing code just create a configuration f
 
 ~~~bash
 # a sample configuration file is provided at configs/train.yaml 
-python train.py --config-dir=configs/train.yaml
+python train.py --config-file=configs/train.yaml
 ~~~
