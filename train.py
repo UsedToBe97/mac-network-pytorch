@@ -113,7 +113,6 @@ def update_cfg(cfg):
         "--config-file",
         metavar="FILE",
         help="path to config file",
-        required=True,
     )
     parser.add_argument(
         "opts",
