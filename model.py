@@ -18,7 +18,7 @@ class ControlUnit(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        self.shared_control_proj = linear(cfg.MAC.DIM * 2, cfg.MAC.DIM)
+        self.shared_control_proj = linear(cfg.MAC.DIM, cfg.MAC.DIM)
         self.position_aware = nn.ModuleList()
         for i in range(cfg.MAC.MAX_ITER):
             self.position_aware.append(linear(cfg.MAC.DIM, cfg.MAC.DIM))    # if controlInputUnshared
@@ -32,7 +32,7 @@ class ControlUnit(nn.Module):
         cur_step = len(controls) - 1
         control = controls[-1]
 
-        question = F.tanh(self.shared_control_proj(question))       # TODO: avoid repeating call
+        question = torch.tanh(self.shared_control_proj(question))       # TODO: avoid repeating call
         position_aware = self.position_aware[cur_step](question)
 
         control_question = torch.cat([control, position_aware], 1)
@@ -63,23 +63,19 @@ class ReadUnit(nn.Module):
         self.read_dropout = nn.Dropout(cfg.MAC.READ_DROPOUT)
         self.mem_proj = linear(cfg.MAC.DIM, cfg.MAC.DIM)
         self.kb_proj = linear(cfg.MAC.DIM, cfg.MAC.DIM)
-        self.concat = linear(cfg.MAC.DIM * 3, cfg.MAC.DIM)
+        self.concat = linear(cfg.MAC.DIM * 2, cfg.MAC.DIM)
         self.concat2 = linear(cfg.MAC.DIM, cfg.MAC.DIM)
         self.attn = linear(cfg.MAC.DIM, 1)
 
     def forward(self, memory, know, control):
         ## Step 1: knowledge base / memory interactions 
         last_mem = self.read_dropout(memory[-1])
-        know = self.read_dropout(know)
-        proj_mem = self.mem_proj(last_mem).unsqueeze(2)
-        proj_know = self.kb_proj(know.permute(0,2,1)).permute(0,2,1)
-        concat = torch.cat([
-                proj_mem * proj_know, 
-                proj_know,      # readMemConcatKB
-                proj_mem        # readMemConcatProj (this also makes the know above be the projection)
-                ], 1)
+        know = self.read_dropout(know.permute(0,2,1))
+        proj_mem = self.mem_proj(last_mem).unsqueeze(1)
+        proj_know = self.kb_proj(know)
+        concat = torch.cat([proj_mem * proj_know, proj_know], 2)
         # project memory interactions back to hidden dimension
-        concat = self.concat2(F.elu(self.concat(concat).permute(0, 2, 1)))       # if readMemProj ++ second projection and nonlinearity if readMemAct 
+        concat = self.concat2(F.elu(self.concat(concat)))       # if readMemProj ++ second projection and nonlinearity if readMemAct 
 
         ## Step 2: compute interactions with control (if config.readCtrl)
         attn = concat * control[-1].unsqueeze(1)
@@ -92,9 +88,9 @@ class ReadUnit(nn.Module):
 
         attn = self.read_dropout(attn)
         attn = self.attn(attn).squeeze(2)
-        attn = F.softmax(attn, 1).unsqueeze(1)
+        attn = F.softmax(attn, 1).unsqueeze(2)
 
-        read = (attn * know).sum(2)
+        read = (attn * know).sum(1)
 
         return read
 
@@ -194,8 +190,8 @@ class OutputUnit(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.question_proj = nn.Linear(cfg.MAC.DIM * 2, cfg.MAC.DIM)
-        self.classifier = nn.Sequential(nn.Dropout(p=cfg.MAC.OUTPUT_DROPOUT),       # output dropout outputDropout=0.85
+        self.question_proj = nn.Linear(cfg.MAC.DIM, cfg.MAC.DIM)
+        self.classifier_out = nn.Sequential(nn.Dropout(p=cfg.MAC.OUTPUT_DROPOUT),       # output dropout outputDropout=0.85
                                         nn.Linear(cfg.MAC.DIM * 2, cfg.MAC.DIM),
                                         nn.ELU(),
                                         nn.Dropout(p=cfg.MAC.OUTPUT_DROPOUT),       # output dropout outputDropout=0.85
@@ -222,7 +218,7 @@ class RecurrentWrapper(nn.Module):
     def forward(self, *inputs):
         state = self.controller.init_hidden(inputs[1].size(0))
 
-        for _ in range(1, self.cfg.ACT.MAX_ITER + 1):
+        for _ in range(1, self.cfg.MAC.MAX_ITER + 1):
             state = self.controller(inputs, state)
 
             # memory gate
@@ -250,8 +246,10 @@ class MACNetwork(nn.Module):
             nn.ELU())
         self.question_dropout = nn.Dropout(cfg.MAC.QUESTION_DROPOUT)
         self.embed = nn.Embedding(cfg.INPUT.N_VOCAB, cfg.MAC.EMBD_DIM)
-        self.lstm = nn.LSTM(cfg.MAC.EMBD_DIM, cfg.MAC.DIM,
-                        dropout=cfg.MAC.ENC_INPUT_DROPOUT,
+        # if bi: (bidirectional)
+        hDim = int(cfg.MAC.DIM / 2)
+        self.lstm = nn.LSTM(cfg.MAC.EMBD_DIM, hDim,
+                        # dropout=cfg.MAC.ENC_INPUT_DROPOUT,
                         batch_first=True, bidirectional=True)
 
         # choose different wrappers for no-act/actSmooth/actBaseline
@@ -262,12 +260,12 @@ class MACNetwork(nn.Module):
 
     def reset(self):
         # from original implementation
-        self.embed.weight.data.xavier_uniform_()
+        xavier_uniform_(self.embed.weight)
 
-        xavier_uniform_(self.conv[0].weight)
-        self.conv[0].bias.data.zero_()
-        xavier_uniform_(self.conv[2].weight)
-        self.conv[2].bias.data.zero_()
+        xavier_uniform_(self.conv[1].weight)
+        self.conv[1].bias.data.zero_()
+        xavier_uniform_(self.conv[4].weight)
+        self.conv[4].bias.data.zero_()
 
     def forward(self, image, question, question_len, dropout=0.15):
         b_size = question.size(0)

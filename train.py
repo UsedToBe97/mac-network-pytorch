@@ -132,7 +132,6 @@ def update_cfg(cfg):
 if __name__ == '__main__':
     cfg = update_cfg(cfg)
 
-
     net = MACNetwork(cfg).to(device)
     net_running = MACNetwork(cfg).to(device)
 
@@ -149,7 +148,6 @@ if __name__ == '__main__':
     scheduler = None
     if cfg.SOLVER.USE_SCHEDULER:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.5, patience=2, threshold=0.001, threshold_mode='rel', min_lr=1e-5)
-        experiment.add_tag("SCH")
 
     for epoch in range(1, cfg.SOLVER.EPOCHS + 1):
         train(epoch)
