@@ -148,7 +148,7 @@ if __name__ == '__main__':
     # LR scheduler
     scheduler = None
     if cfg.SOLVER.USE_SCHEDULER:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.5, patience=2, threshold=0.001, threshold_mode='rel', min_lr=1e-5)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.5, patience=0, threshold=0.001, threshold_mode='rel')
         experiment.add_tag("SCH")
 
     for epoch in range(1, cfg.SOLVER.EPOCHS + 1):
