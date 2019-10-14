@@ -89,20 +89,11 @@ def valid(epoch):
             correct = output.detach().argmax(1) == answer.to(device)
             
             all_corrects += correct.float().mean().item()
-            acc_steps += float(cfg.ACT.MAX_ITER)
         
         if scheduler:
             scheduler.step(all_corrects / len(dataset))
 
-    with open('log/log_{}_{}.txt'.format(cfg.SAVE_PATH, str(epoch).zfill(2)), 'w') as w:
-        for k, v in family_total.items():
-            w.write('{}: {:.5f}\n'.format(k, family_correct[k] / v))
-
-    print(
-        'Avg Acc: {:.5f}'.format(
-            sum(family_correct.values()) / sum(family_total.values())
-        )
-    )
+        print('Avg Acc: {:.5f}'.format(all_corrects / len(dataset)))
 
     clevr.close()
 
@@ -132,7 +123,6 @@ def update_cfg(cfg):
 if __name__ == '__main__':
     cfg = update_cfg(cfg)
 
-
     net = MACNetwork(cfg).to(device)
     net_running = MACNetwork(cfg).to(device)
 
@@ -149,7 +139,6 @@ if __name__ == '__main__':
     scheduler = None
     if cfg.SOLVER.USE_SCHEDULER:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.5, patience=0, threshold=0.001, threshold_mode='rel')
-        experiment.add_tag("SCH")
 
     for epoch in range(1, cfg.SOLVER.EPOCHS + 1):
         train(epoch)
