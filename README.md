@@ -2,8 +2,22 @@
 
 Forked from [rosinality/mac-network-pytorch](https://github.com/rosinality/mac-network-pytorch) which is based on  [Memory, Attention and Composition (MAC) Network for CLEVR from Compositional Attention Networks for Machine Reasoning](https://arxiv.org/abs/1803.03067).
 
-This fork fixes some of the problems in the rosinality's implementation, such as adding two missing projections, and the addition of gradient clipping and a LR scheduler.
-It also cleans up the code and makes it more easily modified by further separating the model into components and using [yacs](https://github.com/rbgirshick/yacs) for all configuration parameters.
+This fork is born after observing that existing pytorch implementations were performing weel below what they should according to the paper and the oficial tensorflow implementation. Following the later the changes done to the implementation this repository was forked from are:
+
+1. Fixed dropout values (for each of now multiple dropout sectors).
+1. Fixed LSTM dimensions.
+1. Fixed bidirectional RNN question vector.
+1. Added dropout to convolutional layers.
+1. Fixed weight initializations.
+1. Added missing controlUnit projection.
+1. Added two missing projections to readUnit.
+1. Removed unnecesary projection in writeUnit.
+1. Doubled layers in classifier_out.
+1. Many more things I forgot to write here...
+
+
+This implementation also cleans up the code and makes it more easily modified by further separating the model into components, using pytorch 1.0's `device`, and using [yacs](https://github.com/rbgirshick/yacs) for all configuration parameters.
+
 
 
 ### 1. Install requirements
