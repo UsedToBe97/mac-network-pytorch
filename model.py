@@ -162,13 +162,17 @@ class MACCell(nn.Module):
         self.write = WriteUnit(cfg)
 
         self.mem_0 = nn.Parameter(torch.zeros(1, cfg.MAC.DIM))
-        # TODO: control0 is most often question, other times (eg. args2.txt) its a learned parameter initialized as random normal
-        self.control_0 = nn.Parameter(torch.zeros(1, cfg.MAC.DIM))
+        # control0 is most often question, other times (eg. args2.txt) its a learned parameter initialized as random normal
+        if not cfg.MAC.INIT_CNTRL_AS_Q:
+            self.control_0 = nn.Parameter(torch.zeros(1, cfg.MAC.DIM))
 
         self.dim = cfg.MAC.DIM
 
-    def init_hidden(self, b_size):
-        control = self.control_0.expand(b_size, self.dim)
+    def init_hidden(self, b_size, question):
+        if self.cfg.MAC.INIT_CNTRL_AS_Q:
+            control = question
+        else:
+            control = self.control_0.expand(b_size, self.dim)
         memory = self.mem_0.expand(b_size, self.dim)
 
         controls = [control]
@@ -221,7 +225,7 @@ class RecurrentWrapper(nn.Module):
         self.gate = linear(cfg.MAC.DIM, 1)
     
     def forward(self, *inputs):
-        state = self.controller.init_hidden(inputs[1].size(0))
+        state = self.controller.init_hidden(inputs[1].size(0), inputs[1])
 
         for _ in range(1, self.cfg.MAC.MAX_ITER + 1):
             state = self.controller(inputs, state)
