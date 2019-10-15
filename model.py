@@ -166,6 +166,7 @@ class MACCell(nn.Module):
         if not cfg.MAC.INIT_CNTRL_AS_Q:
             self.control_0 = nn.Parameter(torch.zeros(1, cfg.MAC.DIM))
 
+        self.cfg = cfg
         self.dim = cfg.MAC.DIM
 
     def init_hidden(self, b_size, question):
