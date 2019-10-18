@@ -12,6 +12,11 @@ def linear(in_dim, out_dim, bias=True):
         lin.bias.data.zero_()
     return lin
 
+def applyVarDpMask(inp, mask, keepProb):
+    div_value = torch.full((1,), keepProb, dtype=inp.dtype, device=inp.device)
+    ret = (torch.div(inp, div_value)) * mask
+    return ret
+
 
 class ControlUnit(nn.Module):
     def __init__(self, cfg):
@@ -67,9 +72,14 @@ class ReadUnit(nn.Module):
         self.concat2 = linear(cfg.MAC.DIM, cfg.MAC.DIM)
         self.attn = linear(cfg.MAC.DIM, 1)
 
-    def forward(self, memory, know, control):
+    def forward(self, memory, know, control, masks):
         ## Step 1: knowledge base / memory interactions 
-        last_mem = self.read_dropout(memory[-1])
+        if self.training:
+            if self.cfg.MAC.MEMORY_VAR_DROPOUT:
+                # last_mem = memory[-1] * masks
+                last_mem = applyVarDpMask(memory[-1], masks, self.cfg.MAC.READ_DROPOUT)
+            else:
+                last_mem = self.read_dropout(memory[-1])
         know = self.read_dropout(know.permute(0,2,1))
         proj_mem = self.mem_proj(last_mem).unsqueeze(1)
         proj_know = self.kb_proj(know)
@@ -83,13 +93,13 @@ class ReadUnit(nn.Module):
         concat = self.concat2(F.elu(self.concat(concat)))       # if readMemProj ++ second projection and nonlinearity if readMemAct 
 
         ## Step 2: compute interactions with control (if config.readCtrl)
-        attn = concat * control[-1].unsqueeze(1)
+        attn = F.elu(concat * control[-1].unsqueeze(1))
 
         # if readCtrlConcatInter torch.cat([interactions, concat])
 
         # optionally concatenate knowledge base elements
 
-        # optional nonlinearity 
+        # optional nonlinearity
 
         attn = self.read_dropout(attn)
         attn = self.attn(attn).squeeze(2)
@@ -168,6 +178,10 @@ class MACCell(nn.Module):
 
         self.cfg = cfg
         self.dim = cfg.MAC.DIM
+    
+    def get_mask(self, x, dropout):
+        mask = torch.empty_like(x).bernoulli_(1 - dropout)
+        return mask
 
     def init_hidden(self, b_size, question):
         if self.cfg.MAC.INIT_CNTRL_AS_Q:
@@ -175,20 +189,24 @@ class MACCell(nn.Module):
         else:
             control = self.control_0.expand(b_size, self.dim)
         memory = self.mem_0.expand(b_size, self.dim)
+        if self.training and self.cfg.MAC.MEMORY_VAR_DROPOUT:
+            memory_mask = self.get_mask(memory, self.cfg.MAC.MEM_DROPOUT)
+        else:
+            memory_mask = None
 
         controls = [control]
         memories = [memory]
 
-        return (controls, memories)
+        return (controls, memories), (memory_mask)
 
-    def forward(self, inputs, state):
+    def forward(self, inputs, state, masks):
         words, question, img = inputs
         controls, memories = state
 
         control = self.control(words, question, controls)
         controls.append(control)
 
-        read = self.read(memories, img, controls)
+        read = self.read(memories, img, controls, masks)
         # if config.writeDropout < 1.0:     dropouts["write"]
         memory = self.write(memories, read, controls)
         memories.append(memory)
@@ -226,10 +244,10 @@ class RecurrentWrapper(nn.Module):
         self.gate = linear(cfg.MAC.DIM, 1)
     
     def forward(self, *inputs):
-        state = self.controller.init_hidden(inputs[1].size(0), inputs[1])
+        state, masks = self.controller.init_hidden(inputs[1].size(0), inputs[1])
 
         for _ in range(1, self.cfg.MAC.MAX_ITER + 1):
-            state = self.controller(inputs, state)
+            state = self.controller(inputs, state, masks)
 
             # memory gate
             if self.cfg.MAC.MEMORY_GATE:

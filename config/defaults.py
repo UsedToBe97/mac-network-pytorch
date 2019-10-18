@@ -19,6 +19,7 @@ _C.MAC.MEMORY_GATE = True
 _C.MAC.MEMORY_GATE_BIAS = 1.0
 _C.MAC.INIT_CNTRL_AS_Q = True
 _C.MAC.MAX_ITER = 12
+_C.MAC.MEMORY_VAR_DROPOUT = True
 
 
 # -----------------------------------------------------------------------------
