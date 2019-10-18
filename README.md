@@ -5,7 +5,7 @@ Forked from [rosinality/mac-network-pytorch](https://github.com/rosinality/mac-n
 This fork is born after observing that existing pytorch implementations were performing weel below what they should according to the paper and the oficial tensorflow implementation. Following the later the changes done to the implementation this repository was forked from are:
 
 1. Fixed dropout values (for each of now multiple dropout sectors).
-1. Fixed variational dropout mask generation and aplication for memory and removed it for control.
+1. Removed variational dropout for control.
 1. Fixed LSTM dimensions.
 1. Fixed bidirectional RNN question vector.
 1. Added dropout to convolutional layers.

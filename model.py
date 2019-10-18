@@ -12,11 +12,6 @@ def linear(in_dim, out_dim, bias=True):
         lin.bias.data.zero_()
     return lin
 
-def applyVarDpMask(inp, mask, keepProb):
-    div_value = torch.full((1,), keepProb, dtype=inp.dtype, device=inp.device)
-    ret = (torch.div(inp, div_value)) * mask
-    return ret
-
 
 class ControlUnit(nn.Module):
     def __init__(self, cfg):
@@ -76,8 +71,7 @@ class ReadUnit(nn.Module):
         ## Step 1: knowledge base / memory interactions 
         if self.training:
             if self.cfg.MAC.MEMORY_VAR_DROPOUT:
-                # last_mem = memory[-1] * masks
-                last_mem = applyVarDpMask(memory[-1], masks, self.cfg.MAC.READ_DROPOUT)
+                last_mem = memory[-1] * masks
             else:
                 last_mem = self.read_dropout(memory[-1])
         know = self.read_dropout(know.permute(0,2,1))
@@ -181,6 +175,7 @@ class MACCell(nn.Module):
     
     def get_mask(self, x, dropout):
         mask = torch.empty_like(x).bernoulli_(1 - dropout)
+        mask = mask / (1 - dropout)
         return mask
 
     def init_hidden(self, b_size, question):
